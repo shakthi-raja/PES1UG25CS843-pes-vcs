@@ -235,7 +235,95 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // TODO: Implement
-    (void)id; (void)type_out; (void)data_out; (void)len_out;
-    return -1;
+    if (!id || !type_out || !data_out || !len_out) return -1;
+
+    char path[512];
+    object_path(id, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+
+    long file_size = ftell(f);
+    if (file_size < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return -1;
+    }
+
+    uint8_t *buffer = malloc((size_t)file_size);
+    if (!buffer) {
+        fclose(f);
+        return -1;
+    }
+
+    if (file_size > 0 && fread(buffer, 1, (size_t)file_size, f) != (size_t)file_size) {
+        free(buffer);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    const uint8_t *header_end = memchr(buffer, '\0', (size_t)file_size);
+    if (!header_end) {
+        free(buffer);
+        return -1;
+    }
+
+    size_t header_len = (size_t)(header_end - buffer);
+    char header[64];
+    if (header_len >= sizeof(header)) {
+        free(buffer);
+        return -1;
+    }
+
+    memcpy(header, buffer, header_len);
+    header[header_len] = '\0';
+
+    char type_name[16];
+    size_t data_len;
+    char trailing;
+    if (sscanf(header, "%15s %zu %c", type_name, &data_len, &trailing) != 2) {
+        free(buffer);
+        return -1;
+    }
+
+    ObjectType parsed_type;
+    if (strcmp(type_name, "blob") == 0) parsed_type = OBJ_BLOB;
+    else if (strcmp(type_name, "tree") == 0) parsed_type = OBJ_TREE;
+    else if (strcmp(type_name, "commit") == 0) parsed_type = OBJ_COMMIT;
+    else {
+        free(buffer);
+        return -1;
+    }
+
+    size_t payload_offset = header_len + 1;
+    if (payload_offset + data_len != (size_t)file_size) {
+        free(buffer);
+        return -1;
+    }
+
+    ObjectID actual_id;
+    compute_hash(buffer, (size_t)file_size, &actual_id);
+    if (memcmp(actual_id.hash, id->hash, HASH_SIZE) != 0) {
+        free(buffer);
+        return -1;
+    }
+
+    uint8_t *payload = malloc(data_len > 0 ? data_len : 1);
+    if (!payload) {
+        free(buffer);
+        return -1;
+    }
+
+    if (data_len > 0) memcpy(payload, buffer + payload_offset, data_len);
+
+    free(buffer);
+    *type_out = parsed_type;
+    *data_out = payload;
+    *len_out = data_len;
+    return 0;
 }
