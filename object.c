@@ -70,6 +70,14 @@ static const char *object_type_name(ObjectType type) {
     return NULL;
 }
 
+static int object_type_from_name(const char *name, ObjectType *type_out) {
+    if (strcmp(name, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(name, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(name, "commit") == 0) *type_out = OBJ_COMMIT;
+    else return -1;
+    return 0;
+}
+
 static int write_all(int fd, const void *buf, size_t len) {
     const uint8_t *ptr = (const uint8_t *)buf;
     while (len > 0) {
@@ -292,10 +300,7 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     }
 
     ObjectType parsed_type;
-    if (strcmp(type_name, "blob") == 0) parsed_type = OBJ_BLOB;
-    else if (strcmp(type_name, "tree") == 0) parsed_type = OBJ_TREE;
-    else if (strcmp(type_name, "commit") == 0) parsed_type = OBJ_COMMIT;
-    else {
+    if (object_type_from_name(type_name, &parsed_type) != 0) {
         free(buffer);
         return -1;
     }
