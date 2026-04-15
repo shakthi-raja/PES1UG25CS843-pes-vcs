@@ -262,6 +262,11 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
         return -1;
     }
 
+    if (file_size == 0) {
+        fclose(f);
+        return -1;
+    }
+
     uint8_t *buffer = malloc((size_t)file_size);
     if (!buffer) {
         fclose(f);
@@ -306,6 +311,10 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     }
 
     size_t payload_offset = header_len + 1;
+    if (payload_offset > (size_t)file_size) {
+        free(buffer);
+        return -1;
+    }
     if (payload_offset + data_len != (size_t)file_size) {
         free(buffer);
         return -1;
