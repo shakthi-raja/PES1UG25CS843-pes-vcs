@@ -181,6 +181,12 @@ int head_update(const ObjectID *new_commit) {
 
 // ─── TODO: Implement these ───────────────────────────────────────────────────
 
+static void populate_commit_metadata(Commit *commit, const char *message) {
+    snprintf(commit->author, sizeof(commit->author), "%s", pes_author());
+    commit->timestamp = (uint64_t)time(NULL);
+    snprintf(commit->message, sizeof(commit->message), "%s", message);
+}
+
 // Create a new commit from the current staging area.
 //
 // HINTS - Useful functions to call:
@@ -201,9 +207,7 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
 
     if (tree_from_index(&commit.tree) != 0) return -1;
 
-    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
-    commit.timestamp = (uint64_t)time(NULL);
-    snprintf(commit.message, sizeof(commit.message), "%s", message);
+    populate_commit_metadata(&commit, message);
 
     void *data = NULL;
     size_t len = 0;
