@@ -201,6 +201,7 @@ static void populate_commit_metadata(Commit *commit, const char *message) {
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
     if (!message || !commit_id_out) return -1;
+    if (message[0] == '\0') return -1;
 
     Commit commit;
     memset(&commit, 0, sizeof(commit));
