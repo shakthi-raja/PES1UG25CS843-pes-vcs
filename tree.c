@@ -175,6 +175,14 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
 
         const char *slash = strchr(relative, '/');
         if (!slash) {
+            int existing = tree_find_entry(&tree, relative);
+            if (existing >= 0) {
+                if (tree.entries[existing].mode == MODE_DIR) return -1;
+                tree.entries[existing].mode = index->entries[i].mode;
+                tree.entries[existing].hash = index->entries[i].hash;
+                continue;
+            }
+
             if (tree.count >= MAX_TREE_ENTRIES) return -1;
             TreeEntry *entry = &tree.entries[tree.count++];
             entry->mode = index->entries[i].mode;
@@ -189,7 +197,11 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
         memcpy(dir_name, relative, dir_len);
         dir_name[dir_len] = '\0';
 
-        if (tree_find_entry(&tree, dir_name) >= 0) continue;
+        int existing = tree_find_entry(&tree, dir_name);
+        if (existing >= 0) {
+            if (tree.entries[existing].mode != MODE_DIR) return -1;
+            continue;
+        }
 
         char child_prefix[512];
         int child_len = snprintf(child_prefix, sizeof(child_prefix), "%s%.*s/",
