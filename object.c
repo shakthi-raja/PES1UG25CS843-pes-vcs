@@ -167,7 +167,10 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(shard_dir, final_path, shard_len);
     shard_dir[shard_len] = '\0';
 
-    if (mkdir(shard_dir, 0755) != 0 && errno != EEXIST) {
+    int created_shard = 0;
+    if (mkdir(shard_dir, 0755) == 0) {
+        created_shard = 1;
+    } else if (errno != EEXIST) {
         free(full);
         return -1;
     }
@@ -209,6 +212,11 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     }
 
     if (fsync_directory(shard_dir) != 0) {
+        free(full);
+        return -1;
+    }
+
+    if (created_shard && fsync_directory(OBJECTS_DIR) != 0) {
         free(full);
         return -1;
     }
