@@ -274,9 +274,11 @@ int index_save(const Index *index) {
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
     if (!index || !path) return -1;
+    if (path[0] == '\0' || strlen(path) >= sizeof(index->entries[0].path)) return -1;
 
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return -1;
+    if ((uint64_t)st.st_size > UINT32_MAX) return -1;
 
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
@@ -293,7 +295,10 @@ int index_add(Index *index, const char *path) {
         return -1;
     }
 
-    fclose(f);
+    if (fclose(f) != 0) {
+        free(data);
+        return -1;
+    }
 
     ObjectID blob_id;
     int rc = object_write(OBJ_BLOB, data, (size_t)st.st_size, &blob_id);
