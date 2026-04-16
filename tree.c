@@ -120,6 +120,13 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
+static int tree_find_entry(const Tree *tree, const char *name) {
+    for (int i = 0; i < tree->count; i++) {
+        if (strcmp(tree->entries[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
 static int tree_load_index(Index *index) {
     index->count = 0;
 
@@ -182,14 +189,7 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
         memcpy(dir_name, relative, dir_len);
         dir_name[dir_len] = '\0';
 
-        int exists = 0;
-        for (int j = 0; j < tree.count; j++) {
-            if (strcmp(tree.entries[j].name, dir_name) == 0) {
-                exists = 1;
-                break;
-            }
-        }
-        if (exists) continue;
+        if (tree_find_entry(&tree, dir_name) >= 0) continue;
 
         char child_prefix[512];
         int child_len = snprintf(child_prefix, sizeof(child_prefix), "%s%.*s/",
