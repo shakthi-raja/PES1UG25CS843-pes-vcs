@@ -175,6 +175,7 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
 
         const char *relative = path + prefix_len;
         if (relative[0] == '\0') continue;
+        if (relative[0] == '/' || strcmp(relative, ".") == 0) return -1;
 
         const char *slash = strchr(relative, '/');
         if (!slash) {
@@ -196,7 +197,8 @@ static int write_tree_level(const Index *index, const char *prefix, ObjectID *id
 
         size_t dir_len = (size_t)(slash - relative);
         char dir_name[256];
-        if (dir_len == 0 || dir_len >= sizeof(dir_name)) return -1;
+        if (dir_len == 0 || slash[1] == '\0') return -1;
+        if (dir_len >= sizeof(dir_name)) return -1;
         memcpy(dir_name, relative, dir_len);
         dir_name[dir_len] = '\0';
 
