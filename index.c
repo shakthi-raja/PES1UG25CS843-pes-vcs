@@ -137,6 +137,14 @@ static int compare_index_entries(const void *a, const void *b) {
     return strcmp(left->path, right->path);
 }
 
+static int fsync_directory(const char *path) {
+    int dir_fd = open(path, O_RDONLY | O_DIRECTORY);
+    if (dir_fd < 0) return -1;
+    int rc = fsync(dir_fd);
+    close(dir_fd);
+    return rc;
+}
+
 // Load the index from .pes/index.
 //
 // HINTS - Useful functions:
@@ -243,6 +251,11 @@ int index_save(const Index *index) {
     if (rename(tmp_path, INDEX_FILE) != 0) {
         free(sorted);
         unlink(tmp_path);
+        return -1;
+    }
+
+    if (fsync_directory(PES_DIR) != 0) {
+        free(sorted);
         return -1;
     }
 
