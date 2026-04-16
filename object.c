@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <openssl/evp.h>
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
@@ -60,6 +61,37 @@ int object_exists(const ObjectID *id) {
     return access(path, F_OK) == 0;
 }
 
+static const char *object_type_name(ObjectType type) {
+    switch (type) {
+        case OBJ_BLOB:   return "blob";
+        case OBJ_TREE:   return "tree";
+        case OBJ_COMMIT: return "commit";
+    }
+    return NULL;
+}
+
+static int write_all(int fd, const void *buf, size_t len) {
+    const uint8_t *ptr = (const uint8_t *)buf;
+    while (len > 0) {
+        ssize_t written = write(fd, ptr, len);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        ptr += written;
+        len -= (size_t)written;
+    }
+    return 0;
+}
+
+static int fsync_directory(const char *path) {
+    int dir_fd = open(path, O_RDONLY | O_DIRECTORY);
+    if (dir_fd < 0) return -1;
+    int rc = fsync(dir_fd);
+    close(dir_fd);
+    return rc;
+}
+
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
 // Write an object to the store.
@@ -94,9 +126,90 @@ int object_exists(const ObjectID *id) {
 //
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
+    const char *type_name = object_type_name(type);
+    if (!type_name || !id_out) return -1;
+    if (len > 0 && !data) return -1;
+
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_name, len);
+    if (header_len < 0 || (size_t)header_len >= sizeof(header)) return -1;
+
+    size_t full_len = (size_t)header_len + 1 + len;
+    uint8_t *full = malloc(full_len);
+    if (!full) return -1;
+
+    memcpy(full, header, (size_t)header_len);
+    full[header_len] = '\0';
+    if (len > 0) memcpy(full + header_len + 1, data, len);
+
+    compute_hash(full, full_len, id_out);
+    if (object_exists(id_out)) {
+        free(full);
+        return 0;
+    }
+
+    char final_path[512];
+    char shard_dir[512];
+    char tmp_path[512];
+    object_path(id_out, final_path, sizeof(final_path));
+
+    char *slash = strrchr(final_path, '/');
+    if (!slash) {
+        free(full);
+        return -1;
+    }
+
+    size_t shard_len = (size_t)(slash - final_path);
+    if (shard_len >= sizeof(shard_dir)) {
+        free(full);
+        return -1;
+    }
+    memcpy(shard_dir, final_path, shard_len);
+    shard_dir[shard_len] = '\0';
+
+    if (mkdir(shard_dir, 0755) != 0 && errno != EEXIST) {
+        free(full);
+        return -1;
+    }
+
+    int tmp_len = snprintf(tmp_path, sizeof(tmp_path), "%s/tmp-XXXXXX", shard_dir);
+    if (tmp_len < 0 || (size_t)tmp_len >= sizeof(tmp_path)) {
+        free(full);
+        return -1;
+    }
+
+    int fd = mkstemp(tmp_path);
+    if (fd < 0) {
+        free(full);
+        return -1;
+    }
+
+    if (write_all(fd, full, full_len) != 0 || fsync(fd) != 0) {
+        close(fd);
+        unlink(tmp_path);
+        free(full);
+        return -1;
+    }
+
+    if (close(fd) != 0) {
+        unlink(tmp_path);
+        free(full);
+        return -1;
+    }
+
+    if (rename(tmp_path, final_path) != 0) {
+        unlink(tmp_path);
+        free(full);
+        return -1;
+    }
+
+    if (fsync_directory(shard_dir) != 0) {
+        free(full);
+        return -1;
+    }
+
+    free(full);
+    return 0;
 }
 
 // Read an object from the store.
