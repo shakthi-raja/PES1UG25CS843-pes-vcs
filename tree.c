@@ -142,6 +142,9 @@ static int tree_load_index(Index *index) {
 
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (line[0] == '\0') continue;
+
         if (index->count >= MAX_INDEX_ENTRIES) {
             fclose(f);
             return -1;
