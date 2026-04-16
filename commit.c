@@ -214,5 +214,9 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
 
     int rc = object_write(OBJ_COMMIT, data, len, commit_id_out);
     free(data);
-    return rc;
+    if (rc != 0) return -1;
+
+    if (head_update(commit_id_out) != 0) return -1;
+
+    return 0;
 }
