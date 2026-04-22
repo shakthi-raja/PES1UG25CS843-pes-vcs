@@ -1,4 +1,4 @@
-# PES-VCS Project Report
+# PES-VCS — A Version Control System from Scratch
 
 - Name: `Shakthi Raja G P`
 - SRN: `PES1UG25CS843`
@@ -35,6 +35,265 @@ export PES_AUTHOR="Shakthi Raja G P <PES1UG25CS843>"
 ./test_objects
 ./test_tree
 make test-integration
+```
+
+## Git Internals Background
+
+Before implementing PES-VCS, it is useful to understand how Git works internally. Git is a content-addressable filesystem with a few clever data structures on top. Everything in this project is based on that design.
+
+### The Big Picture
+
+When `git commit` is run, Git does not store only changes or diffs. It stores complete snapshots of the project. Git makes this efficient using two key ideas:
+
+1. **Content-addressable storage:** every file is stored by the SHA hash of its contents. Same content means same hash and only one stored copy.
+2. **Tree structures:** directories are stored as tree objects that point to file objects, so unchanged content is simply reused.
+
+```text
+Your project at commit A:          Your project at commit B:
+                                   (only README changed)
+
+    root/                              root/
+    ├── README.md  ─────┐              ├── README.md  ─────┐
+    ├── src/            │              ├── src/            │
+    │   └── main.c ─────┼─┐            │   └── main.c ─────┼─┐
+    └── Makefile ───────┼─┼─┐          └── Makefile ───────┼─┼─┐
+                        │ │ │                              │ │ │
+                        ▼ ▼ ▼                              ▼ ▼ ▼
+    Object Store:       ┌─────────────────────────────────────────────┐
+                        │  a1b2c3 (README v1)    ← only this is new   │
+                        │  d4e5f6 (README v2)                         │
+                        │  789abc (main.c)       ← shared by both!    │
+                        │  fedcba (Makefile)     ← shared by both!    │
+                        └─────────────────────────────────────────────┘
+```
+
+### The Three Object Types
+
+#### 1. Blob
+
+A blob is just file contents. No filename, no permissions, only raw bytes.
+
+```text
+blob 16\0Hello, World!\n
+     ↑    ↑
+     │    └── The actual file content
+     └─────── Size in bytes
+```
+
+The blob is stored at a path determined by its SHA-256 hash. If two files have identical contents, they share one blob.
+
+#### 2. Tree
+
+A tree represents a directory. It is a list of entries, where each entry points to either a blob or another tree.
+
+```text
+100644 blob a1b2c3d4... README.md
+100755 blob e5f6a7b8... build.sh        ← executable file
+040000 tree 9c0d1e2f... src             ← subdirectory
+       ↑    ↑           ↑
+       │    │           └── name
+       │    └── hash of the object
+       └─────── mode (permissions + type)
+```
+
+Mode values:
+
+- `100644` — regular file, not executable
+- `100755` — regular file, executable
+- `040000` — directory (tree)
+
+#### 3. Commit
+
+A commit ties everything together. It points to a tree and stores metadata.
+
+```text
+tree 9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d
+parent a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+author Alice <alice@example.com> 1699900000
+committer Alice <alice@example.com> 1699900000
+
+Add new feature
+```
+
+The parent pointer creates a linked history:
+
+```text
+    C3 ──────► C2 ──────► C1 ──────► (no parent)
+    │          │          │
+    ▼          ▼          ▼
+  Tree3      Tree2      Tree1
+```
+
+### How Objects Connect
+
+```text
+                    ┌─────────────────────────────────┐
+                    │           COMMIT                │
+                    │  tree: 7a3f...                  │
+                    │  parent: 4b2e...                │
+                    │  author: Alice                  │
+                    │  message: "Add feature"         │
+                    └─────────────┬───────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────────────┐
+                    │         TREE (root)             │
+                    │  100644 blob f1a2... README.md  │
+                    │  040000 tree 8b3c... src        │
+                    │  100644 blob 9d4e... Makefile   │
+                    └──────┬──────────┬───────────────┘
+                           │          │
+              ┌────────────┘          └────────────┐
+              ▼                                    ▼
+┌─────────────────────────┐          ┌─────────────────────────┐
+│      TREE (src)         │          │     BLOB (README.md)    │
+│ 100644 blob a5f6 main.c │          │  # My Project           │
+└───────────┬─────────────┘          └─────────────────────────┘
+            ▼
+       ┌────────┐
+       │ BLOB   │
+       │main.c  │
+       └────────┘
+```
+
+### References And HEAD
+
+References are files that map human-readable names to commit hashes:
+
+```text
+.pes/
+├── HEAD                    # "ref: refs/heads/main"
+└── refs/
+    └── heads/
+        └── main            # Contains: a1b2c3d4e5f6...
+```
+
+`HEAD` points to a branch name, and the branch file contains the latest commit hash. When a new commit is made:
+
+1. a new commit object is created
+2. the branch file is updated to the new commit hash
+3. `HEAD` continues to point to the branch
+
+```text
+Before commit:                    After commit:
+
+HEAD ─► main ─► C2 ─► C1         HEAD ─► main ─► C3 ─► C2 ─► C1
+```
+
+### The Index (Staging Area)
+
+The index is the preparation area for the next commit. It tracks which files are staged.
+
+```text
+Working Directory          Index               Repository (HEAD)
+─────────────────         ─────────           ─────────────────
+README.md (modified) ──── pes add ──► README.md (staged)
+src/main.c                            src/main.c          ──► Last commit's
+Makefile                               Makefile                snapshot
+```
+
+The workflow is:
+
+1. `pes add file.txt` computes a blob hash, stores the blob, and updates the index
+2. `pes commit -m "msg"` builds a tree from the index, creates a commit, and updates the branch reference
+
+### Content-Addressable Storage
+
+Objects are named by the hash of their contents:
+
+```python
+# Pseudocode
+def store_object(content):
+    hash = sha256(content)
+    path = f".pes/objects/{hash[0:2]}/{hash[2:]}"
+    write_file(path, content)
+    return hash
+```
+
+This provides:
+
+- **Deduplication:** identical files are stored once
+- **Integrity:** hashes detect corruption
+- **Immutability:** changed content produces a new object
+
+Objects are sharded by the first two hex characters to avoid huge directories:
+
+```text
+.pes/objects/
+├── 2f/
+│   └── 8a3b5c7d9e...
+├── a1/
+│   ├── 9c4e6f8a0b...
+│   └── b2d4f6a8c0...
+└── ff/
+    └── 1234567890...
+```
+
+## PES-VCS Architecture Overview
+
+PES-VCS is organized around the same object and reference model in a simplified form.
+
+Supported commands:
+
+- `pes init`
+- `pes add <file>...`
+- `pes status`
+- `pes commit -m "<message>"`
+- `pes log`
+
+### Repository Layout
+
+The `.pes/` directory structure is:
+
+```text
+my_project/
+├── .pes/
+│   ├── objects/          # Content-addressable blob/tree/commit storage
+│   │   ├── 2f/
+│   │   │   └── 8a3b...   # Sharded by first 2 hex chars of hash
+│   │   └── a1/
+│   │       └── 9c4e...
+│   ├── refs/
+│   │   └── heads/
+│   │       └── main      # Branch pointer (file containing commit hash)
+│   ├── index             # Staging area (text file)
+│   └── HEAD              # Current branch reference
+└── (working directory files)
+```
+
+### Architecture Overview
+
+```text
+┌───────────────────────────────────────────────────────────────┐
+│                      WORKING DIRECTORY                        │
+│                  (actual files you edit)                     │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                        pes add <file>
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                           INDEX                               │
+│                (staged changes, ready to commit)              │
+│                100644 a1b2c3... src/main.c                    │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                       pes commit -m "msg"
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                       OBJECT STORE                            │
+│  ┌───────┐    ┌───────┐    ┌────────┐                         │
+│  │ BLOB  │◄───│ TREE  │◄───│ COMMIT │                         │
+│  │(file) │    │(dir)  │    │(snap)  │                         │
+│  └───────┘    └───────┘    └────────┘                         │
+│  Stored at: .pes/objects/XX/YYY...                            │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                           REFS                                │
+│       .pes/refs/heads/main  →  commit hash                    │
+│       .pes/HEAD             →  "ref: refs/heads/main"         │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Phase 1: Object Storage Foundation
@@ -268,3 +527,9 @@ A hash set is the most suitable data structure for tracking reachability because
 **Answer:** Garbage collection is dangerous during commit creation because a commit is built in stages. A blob or tree object may already be written into `.pes/objects/`, but the final commit object and updated branch reference may not yet exist. If garbage collection runs at that time, it may see the newly written object as unreachable and delete it.
 
 This creates a race condition where the commit process finishes later and records references to objects that have already been removed, leaving the repository corrupted. Real Git avoids this through careful coordination, temporary object protection, reflogs, conservative pruning rules, and by ensuring that recently created objects are not collected too early.
+
+## Further Reading
+
+- Pro Git, Git Internals: https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain
+- Git from the Inside Out: https://codewords.recurse.com/issues/two/git-from-the-inside-out
+- The Git Parable: https://tom.preston-werner.com/2009/05/19/the-git-parable.html
